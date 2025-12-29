@@ -1,6 +1,7 @@
+<!DOCTYPE html>
 <html>
   <head>
-    <title>東京都港区3D橋梁マップ</title>
+    <title>国土地理院 3次元電子国土基本図</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -11,7 +12,10 @@
     <script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
     <script src="https://unpkg.com/deck.gl@8.9.0/dist.min.js"></script>
     <style>
+      html,
       body {
+        height: 100%;
+        width: 100%;
         margin: 0;
         background: #000;
       }
@@ -26,19 +30,29 @@
   <body>
     <div id="map"></div>
     <script type="text/javascript">
+      /**********************************************************************
+       * 設定値
+       **********************************************************************/
+      const addHeight = 1.5; // GeoJSONのZ値に加算する高さ（メートル想定）
+      const ROAD_CASING_DELTA = 1.0; // 道路の外枠を内側より太くする量（m）
+      const ROAD_INNER_DELTA = 1.0; // 道路の内側を基準幅より細くする量（m）
+
+      /**********************************************************************
+       * MapLibre 初期化
+       **********************************************************************/
       const protocol = new pmtiles.Protocol();
       maplibregl.addProtocol("pmtiles", protocol.tile);
 
       const map = new maplibregl.Map({
         container: "map",
         style: "std.json",
-        zoom: 15.2,
+        zoom: 16.9,
         minZoom: 4,
         maxZoom: 23,
-        center: [139.776517, 35.629169],
+        center: [133.189637, 34.429761],
         hash: true,
-        bearing: -12,
-        pitch: 60,
+        bearing: 34.1,
+        pitch: 62,
         maxPitch: 85,
         attributionControl: false,
       });
@@ -50,9 +64,7 @@
       );
       map.addControl(
         new maplibregl.GeolocateControl({
-          positionOptions: {
-            enableHighAccuracy: false,
-          },
+          positionOptions: { enableHighAccuracy: false },
           fitBoundsOptions: { maxZoom: 18 },
           trackUserLocation: true,
           showUserLocation: true,
@@ -62,76 +74,327 @@
         new maplibregl.AttributionControl({
           compact: true,
           customAttribution:
-            '<a href="https://twitter.com/shi__works" target="_blank">X(旧Twitter)</a> | <a href="https://github.com/shiwaku/minato-ku-3d-bridge-on-maplibre" target="_blank">GitHub</a> | <a href="https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2023" target="_blank">3D都市モデル（Project PLATEAU）港区（2023年度）</a>',
+            '<a href="https://twitter.com/shi__works" target="_blank">X(旧Twitter)</a> | ' +
+            '<a href="" target="_blank">GitHub</a> | ' +
+            '<a href="https://www.gsi.go.jp/kibanjoho/mapinfo3D.html" target="_blank">国土地理院 3次元電子国土基本図 試作データ</a>',
         })
       );
 
-      map.addControl(
-        new maplibregl.TerrainControl({
-          source: "aist-dem-terrain-rgb",
-          exaggeration: 1, // 標高を強調する倍率
-        })
-      );
+      /**********************************************************************
+       * 道路：幅（既存ロジック維持）
+       * - Width（実幅）があればそれを優先
+       * - なければ rnkWidth（幅ランク）から代表値を返す
+       **********************************************************************/
+      function roadLineWidth(f) {
+        const p = f && f.properties ? f.properties : null;
+        if (!p) return 1;
 
-      map.on("load", () => {
+        if (p.Width != null && p.Width !== 0) return Number(p.Width);
+
+        if (p.rnkWidth != null) {
+          switch (p.rnkWidth) {
+            case "3m未満":
+              return 3;
+            case "3m-5.5m未満":
+              return 4.5;
+            case "5.5m-13m未満":
+              return 9;
+            case "13m-19.5m未満":
+              return 18;
+            case "19.5m以上":
+              return 27;
+            default:
+              return 1;
+          }
+        }
+        return 30;
+      }
+
+      /**********************************************************************
+       * 道路：色（カテゴリに応じて可変）
+       * - rdCtg（例：国道/都道府県道/市区町村道等/高速...）を優先利用
+       * - ftCode（徒歩道/石段等）で上書きする
+       **********************************************************************/
+      function roadLineColor(f) {
+        const p = f && f.properties ? f.properties : {};
+
+        // ftCode は文字列で来ることがあるため Number() で正規化
+        const ft = Number(p.ftCode);
+
+        // rdCtg も表記揺れがあり得るので文字列化して includes で判定
+        const rd = String(p.rdCtg || "");
+
+        // 幅ランク/実幅（細い道の灰化などに使う場合がある）
+        const rnk = String(p.rnkWidth || "");
+        const w = p.Width != null ? Number(p.Width) : null;
+
+        // ※色は「塗り（inner）」用。外枠（casing）は別レイヤで固定グレーにする。
+        const COLOR = {
+          national: [235, 122, 122, 255], // 国道（赤系）
+          prefect: [255, 255, 0, 255], // 都道府県道（黄）
+          municipal: [255, 255, 255, 255], // 市区町村道等（白）
+          highway: [100, 195, 115, 255], // 高速（緑）
+          footpath: [173, 173, 173, 255], // 徒歩道（薄灰）
+          gray: [100, 100, 100, 255], // その他/不明（灰）
+          snow: [200, 200, 200, 255],
+        };
+
+        // まず道路区分（ベース色）
+        let base = COLOR.gray;
+        let cat = "unknown";
+        if (rd.includes("高速")) {
+          base = COLOR.highway;
+          cat = "highway";
+        } else if (rd.includes("国道")) {
+          base = COLOR.national;
+          cat = "national";
+        } else if (rd.includes("都道府県")) {
+          base = COLOR.prefect;
+          cat = "prefect";
+        } else if (rd.includes("市区町村")) {
+          base = COLOR.municipal;
+          cat = "municipal";
+        } else if (rd.includes("雪")) {
+          base = COLOR.snow;
+          cat = "snow";
+        }
+
+        // 徒歩道（ftCode: 2721/2722/2723）は優先
+        // ※国道の徒歩道はグレー寄り、その他は薄灰…というルールを踏襲
+        if (ft === 2721 || ft === 2722 || ft === 2723) {
+          return rd.includes("国道") ? COLOR.gray : COLOR.footpath;
+        }
+
+        // 石段（ftCode: 2731/2732/2733/2734）はベース色
+        if (ft === 2731 || ft === 2732 || ft === 2733 || ft === 2734) {
+          return base;
+        }
+
+        // 「細い道を灰にする」ルールを入れる場合：
+        // 今回は "国道/都道府県道" を灰にしないため、
+        // 市区町村道等・不明のみを対象にする（黄色が灰になる問題を防止）
+        if (cat === "municipal" || cat === "unknown") {
+          if (
+            rnk.includes("3m未満") ||
+            rnk.includes("不明") ||
+            rnk.includes("その他")
+          ) {
+            return COLOR.gray;
+          }
+          if (w != null && w > 0 && w < 3) {
+            return COLOR.gray;
+          }
+        }
+
+        return base;
+      }
+
+      /**********************************************************************
+       * 道路：外枠と塗りを分けるための幅関数
+       **********************************************************************/
+      function roadCasingWidth(f) {
+        // 外枠（casing）は少し太くする
+        return roadLineWidth(f) + ROAD_CASING_DELTA;
+      }
+      function roadInnerWidth(f) {
+        // 塗り（inner）は少し細くする（0以下にならないように保険）
+        return Math.max(0.1, roadLineWidth(f) - ROAD_INNER_DELTA);
+      }
+
+      /**********************************************************************
+       * 鉄道：色/幅（ftCodeで分岐）
+       **********************************************************************/
+      function railLineColor(f) {
+        const p = f.properties || {};
+        const ft = Number(p.ftCode); // 文字列→数値を吸収
+
+        // 普通鉄道（通常部）
+        if (ft === 2801 || ft === 2803) return [100, 0, 0, 255];
+
+        // 普通鉄道（トンネル・運休）
+        if (ft === 2802 || ft === 2804 || ft === 2806) return [100, 0, 0, 255];
+
+        // 特殊鉄道
+        if (ft === 2811 || ft === 2813 || ft === 2814)
+          return [100, 100, 100, 255];
+
+        // 索道・側線・路面
+        if (ft === 2821 || ft === 2831 || ft === 2841 || ft === 2843)
+          return [100, 100, 100, 255];
+
+        // fallback
+        return [200, 200, 200, 255];
+      }
+
+      function railLineWidth(f) {
+        const p = f.properties || {};
+        const ft = Number(p.ftCode);
+
+        if (ft === 2801 || ft === 2803) return 3; // 普通鉄道（通常部）
+        if (ft === 2802 || ft === 2804 || ft === 2806) return 3; // トンネル・運休
+        if (ft === 2811 || ft === 2813 || ft === 2814) return 1; // 特殊鉄道
+        if (ft === 2821 || ft === 2831 || ft === 2841 || ft === 2843) return 1; // 索道等
+
+        return 1;
+      }
+
+      /**********************************************************************
+       * GeoJSON：Z値（座標の3要素目）に addHeight を加算する
+       * - LineString / MultiLineString のみ対応（道路・鉄道想定）
+       **********************************************************************/
+      function applyAddHeightToLineGeometry(geometry, addH) {
+        if (!geometry) return geometry;
+
+        if (geometry.type === "LineString") {
+          geometry.coordinates = geometry.coordinates.map((c) => [
+            c[0],
+            c[1],
+            (c[2] != null ? c[2] : 0) + addH,
+          ]);
+        } else if (geometry.type === "MultiLineString") {
+          geometry.coordinates = geometry.coordinates.map((line) =>
+            line.map((c) => [c[0], c[1], (c[2] != null ? c[2] : 0) + addH])
+          );
+        }
+        return geometry;
+      }
+
+      function applyAddHeightToFeatureCollection(fc, addH) {
+        if (!fc || !Array.isArray(fc.features)) return fc;
+        fc.features = fc.features.map((f) => {
+          if (f && f.geometry) applyAddHeightToLineGeometry(f.geometry, addH);
+          return f;
+        });
+        return fc;
+      }
+
+      /**********************************************************************
+       * load：MapLibreのロード後に、建物MVTと道路/鉄道GeoJSONを描画
+       **********************************************************************/
+      map.on("load", async () => {
         map.addSource("aist-dem-terrain-rgb", {
           type: "raster-dem",
           tiles: [
             "https://gbank.gsj.jp/seamless/elev/terrainRGB/land/{z}/{y}/{x}.png",
           ],
-          attribution:
-            '<a href="https://tiles.gsj.jp/tiles/elev/tiles.html#h_land" target="_blank">産総研 シームレス標高タイル(陸域統合DEM)</a>',
           tileSize: 256,
+          attribution:
+            '<a href="https://tiles.gsj.jp/tiles/elev/tiles.html#h_land" target="_blank">' +
+            "産総研 シームレス標高タイル(陸域統合DEM)</a>",
         });
 
-        map.setTerrain({ source: "aist-dem-terrain-rgb", exaggeration: 1 });
+        map.setTerrain({
+          source: "aist-dem-terrain-rgb",
+          exaggeration: 1.0,
+        });
 
+        // ===== 建物（MVT） =====
         map.addSource("bldg", {
           type: "vector",
           tiles: [
-            "https://xs489works.xsrv.jp/mvt/13103_minato-ku_pref_2023_bldg_mvt/{z}/{x}/{y}.pbf",
+            "https://xs489works.xsrv.jp/mvt/gsi-3dmap-bldg-tiles/{z}/{x}/{y}.pbf",
           ],
           minzoom: 7,
           maxzoom: 15,
-          attribution:
-            '<a href="https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2023" target="_blank">3D都市モデル（Project PLATEAU）港区（2023年度）</a>',
+          attribution: '<a href="" target="_blank"></a>',
         });
 
+        // 建物は属性 type に応じて色分け（あなたのルールをそのまま）
         map.addLayer({
-          id: "bldg",
+          id: "gsi-3d-buildings",
           type: "fill-extrusion",
           source: "bldg",
-          "source-layer": "bldg:Building",
+          "source-layer": "buildings",
           paint: {
-            "fill-extrusion-height": ["*", ["get", "measuredHeight"], 1],
-            "fill-extrusion-color": "rgb(255, 135, 75)",
-            "fill-extrusion-opacity": 0.7,
+            // repElv - grElv を高さとして利用（必要なら addHeight を足してもOK）
+            "fill-extrusion-height": [
+              "+",
+              ["-", ["get", "repElv"], ["get", "grElv"]],
+              0,
+            ],
+
+            "fill-extrusion-color": [
+              "match",
+              ["get", "type"],
+              "普通建物",
+              "rgba(255,230,190,1)",
+              "堅ろう建物",
+              "rgba(255,230,190,1)",
+              "高層建物",
+              "rgb(255,135,75)",
+              "普通無壁舎",
+              "rgb(255,135,75)",
+              "堅ろう無壁舎",
+              "rgb(255,135,75)",
+              "rgb(200,200,200)", // 想定外
+            ],
+            "fill-extrusion-opacity": 1,
           },
         });
 
+        // ===== 道路・鉄道（GeoJSON） =====
+        // ※ここで読み込んだGeoJSONを「Z + addHeight」して deck.gl に渡す
+        const rails_res = await fetch("./rails.geojson");
+        const rails = await rails_res.json();
+        applyAddHeightToFeatureCollection(rails, addHeight);
+
+        const roads_res = await fetch("./roads.geojson");
+        const roads = await roads_res.json();
+        applyAddHeightToFeatureCollection(roads, addHeight);
+
+        // ===== deck.gl overlay（MapLibre上に重畳） =====
+        // 重要：道路は「外枠(casing)」と「塗り(inner)」を別レイヤにして重ねる
+        //  - 外枠：固定グレー＆太め
+        //  - 塗り：カテゴリ色＆少し細め
         const overlay = new deck.MapboxOverlay({
           interleaved: true,
           layers: [
+            // --- 鉄道（1レイヤでOK） ---
             new deck.GeoJsonLayer({
-              id: "bridge",
-              data: "./Bridge.geojson",
-              extruded: true,
-              wireframe: true,
-              filled: true,
-              stroked: true,
+              id: "gsi-3d-rails",
+              data: rails,
               lineWidthUnits: "meters",
-              getLineWidth: 0.5,
-              getLineColor: [100, 195, 115, 255],
-              getFillColor: [100, 195, 115, 150],
-              getElevation: 5,
-              // material: MATERAL_FLAT,
-              // pickable: true,
+              getLineColor: railLineColor,
+              getLineWidth: railLineWidth,
+              lineCapRounded: false,
+              lineJointRounded: false,
+              pickable: true,
+              // 地表や他の線とチラつく場合に効くことがある
+              // parameters: { depthTest: false },
+            }),
+
+            // --- 道路：外枠（casing） ---
+            new deck.GeoJsonLayer({
+              id: "gsi-3d-roads-casing",
+              data: roads,
+              lineWidthUnits: "meters",
+              // 外枠は固定グレー（国道/都道府県道でも常にグレー）
+              getLineColor: [120, 120, 120, 255],
+              getLineWidth: roadCasingWidth,
+              lineCapRounded: false,
+              lineJointRounded: false,
+              // parameters: { depthTest: false },
+            }),
+
+            // --- 道路：塗り（inner） ---
+            new deck.GeoJsonLayer({
+              id: "gsi-3d-roads-inner",
+              data: roads,
+              lineWidthUnits: "meters",
+              // 塗りは属性に応じた可変色
+              getLineColor: roadLineColor,
+              // 幅ロジックは維持しつつ、内側だけ少し細くして外枠を見せる
+              getLineWidth: roadInnerWidth,
+              lineCapRounded: false,
+              lineJointRounded: false,
+              // parameters: { depthTest: false },
             }),
           ],
         });
 
         map.addControl(overlay);
 
+        // ===== 空（Sky） =====
         map.setSky({
           "sky-color": "#199EF3",
           "sky-horizon-blend": 0.7,
@@ -149,6 +412,10 @@
             0,
           ],
         });
+
+        // ---- デバッグ用（必要なら有効化）----
+        console.log("road props sample:", roads.features[0]?.properties);
+        console.log("rail props sample:", rails.features[0]?.properties);
       });
     </script>
   </body>
