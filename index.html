@@ -1,155 +1,154 @@
 <html>
-  <head>
-    <title>東京都港区3D橋梁マップ</title>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
-    <link
-      href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css"
-      rel="stylesheet"
-    />
-    <script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
-    <script src="https://unpkg.com/deck.gl@8.9.0/dist.min.js"></script>
-    <style>
-      body {
-        margin: 0;
-        background: #000;
-      }
 
-      #map {
-        height: 100%;
-        width: 100%;
-      }
-    </style>
-  </head>
+<head>
+  <title>東京都港区3D橋梁マップ</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+  <script src="https://unpkg.com/deck.gl@8.9.0/dist.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+    }
 
-  <body>
-    <div id="map"></div>
-    <script type="text/javascript">
-      const protocol = new pmtiles.Protocol();
-      maplibregl.addProtocol("pmtiles", protocol.tile);
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+  </style>
+</head>
 
-      const map = new maplibregl.Map({
-        container: "map",
-        style: "std.json",
-        zoom: 15.2,
-        minZoom: 4,
-        maxZoom: 23,
-        center: [139.776517, 35.629169],
-        hash: true,
-        bearing: -12,
-        pitch: 60,
-        maxPitch: 85,
-        attributionControl: false,
+<body>
+  <div id="map"></div>
+  <script type="text/javascript">
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol("pmtiles", protocol.tile);
+
+    const map = new maplibregl.Map({
+      container: "map",
+      style: "std.json",
+      zoom: 15.2,
+      minZoom: 4,
+      maxZoom: 23,
+      center: [139.776517, 35.629169],
+      hash: true,
+      bearing: -12,
+      pitch: 60,
+      maxPitch: 85,
+      attributionControl: false,
+    });
+
+    map.addControl(new maplibregl.NavigationControl());
+    map.addControl(new maplibregl.FullscreenControl());
+    map.addControl(
+      new maplibregl.ScaleControl({ maxWidth: 200, unit: "metric" })
+    );
+    map.addControl(
+      new maplibregl.GeolocateControl({
+        positionOptions: {
+          enableHighAccuracy: false,
+        },
+        fitBoundsOptions: { maxZoom: 18 },
+        trackUserLocation: true,
+        showUserLocation: true,
+      })
+    );
+    map.addControl(
+      new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution:
+          '<a href="https://twitter.com/shi__works" target="_blank">X(旧Twitter)</a> | <a href="https://github.com/shiwaku/minato-ku-3d-bridge-on-maplibre" target="_blank">GitHub</a> | <a href="https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2023" target="_blank">3D都市モデル（Project PLATEAU）港区（2023年度）</a>',
+      })
+    );
+
+    map.addControl(
+      new maplibregl.TerrainControl({
+        source: "aist-dem-terrain-rgb",
+        exaggeration: 1, // 標高を強調する倍率
+      })
+    );
+
+    map.on("load", () => {
+      map.addSource("aist-dem-terrain-rgb", {
+        type: "raster-dem",
+        tiles: [
+          "https://gbank.gsj.jp/seamless/elev/terrainRGB/land/{z}/{y}/{x}.png",
+        ],
+        attribution:
+          '<a href="https://tiles.gsj.jp/tiles/elev/tiles.html#h_land" target="_blank">産総研 シームレス標高タイル(陸域統合DEM)</a>',
+        tileSize: 256,
       });
 
-      map.addControl(new maplibregl.NavigationControl());
-      map.addControl(new maplibregl.FullscreenControl());
-      map.addControl(
-        new maplibregl.ScaleControl({ maxWidth: 200, unit: "metric" })
-      );
-      map.addControl(
-        new maplibregl.GeolocateControl({
-          positionOptions: {
-            enableHighAccuracy: false,
-          },
-          fitBoundsOptions: { maxZoom: 18 },
-          trackUserLocation: true,
-          showUserLocation: true,
-        })
-      );
-      map.addControl(
-        new maplibregl.AttributionControl({
-          compact: true,
-          customAttribution:
-            '<a href="https://twitter.com/shi__works" target="_blank">X(旧Twitter)</a> | <a href="https://github.com/shiwaku/minato-ku-3d-bridge-on-maplibre" target="_blank">GitHub</a> | <a href="https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2023" target="_blank">3D都市モデル（Project PLATEAU）港区（2023年度）</a>',
-        })
-      );
+      map.setTerrain({ source: "aist-dem-terrain-rgb", exaggeration: 1 });
 
-      map.addControl(
-        new maplibregl.TerrainControl({
-          source: "aist-dem-terrain-rgb",
-          exaggeration: 1, // 標高を強調する倍率
-        })
-      );
-
-      map.on("load", () => {
-        map.addSource("aist-dem-terrain-rgb", {
-          type: "raster-dem",
-          tiles: [
-            "https://gbank.gsj.jp/seamless/elev/terrainRGB/land/{z}/{y}/{x}.png",
-          ],
-          attribution:
-            '<a href="https://tiles.gsj.jp/tiles/elev/tiles.html#h_land" target="_blank">産総研 シームレス標高タイル(陸域統合DEM)</a>',
-          tileSize: 256,
-        });
-
-        map.setTerrain({ source: "aist-dem-terrain-rgb", exaggeration: 1 });
-
-        map.addSource("bldg", {
-          type: "vector",
-          tiles: [
-            "https://xs489works.xsrv.jp/mvt/13103_minato-ku_pref_2023_bldg_mvt/{z}/{x}/{y}.pbf",
-          ],
-          minzoom: 7,
-          maxzoom: 15,
-          attribution:
-            '<a href="https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2023" target="_blank">3D都市モデル（Project PLATEAU）港区（2023年度）</a>',
-        });
-
-        map.addLayer({
-          id: "bldg",
-          type: "fill-extrusion",
-          source: "bldg",
-          "source-layer": "bldg:Building",
-          paint: {
-            "fill-extrusion-height": ["*", ["get", "measuredHeight"], 1],
-            "fill-extrusion-color": "rgb(255, 135, 75)",
-            "fill-extrusion-opacity": 0.7,
-          },
-        });
-
-        const overlay = new deck.MapboxOverlay({
-          interleaved: true,
-          layers: [
-            new deck.GeoJsonLayer({
-              id: "bridge",
-              data: "./Bridge.geojson",
-              extruded: true,
-              wireframe: true,
-              filled: true,
-              stroked: true,
-              lineWidthUnits: "meters",
-              getLineWidth: 0.5,
-              getLineColor: [100, 195, 115, 255],
-              getFillColor: [100, 195, 115, 150],
-              getElevation: 5,
-              // material: MATERAL_FLAT,
-              // pickable: true,
-            }),
-          ],
-        });
-
-        map.addControl(overlay);
-
-        map.setSky({
-          "sky-color": "#199EF3",
-          "sky-horizon-blend": 0.7,
-          "horizon-color": "#f0f8ff",
-          "horizon-fog-blend": 0.8,
-          "fog-color": "#2c7fb8",
-          "fog-ground-blend": 0.9,
-          "atmosphere-blend": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            0,
-            1,
-            12,
-            0,
-          ],
-        });
+      map.addSource("bldg", {
+        type: "vector",
+        tiles: [
+          "https://xs489works.xsrv.jp/mvt/13103_minato-ku_pref_2023_bldg_mvt/{z}/{x}/{y}.pbf",
+        ],
+        minzoom: 7,
+        maxzoom: 15,
+        attribution:
+          '<a href="https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2023" target="_blank">3D都市モデル（Project PLATEAU）港区（2023年度）</a>',
       });
-    </script>
-  </body>
+
+      map.addLayer({
+        id: "bldg",
+        type: "fill-extrusion",
+        source: "bldg",
+        "source-layer": "bldg:Building",
+        paint: {
+          "fill-extrusion-height": ["*", ["get", "measuredHeight"], 1],
+          "fill-extrusion-color": "rgb(255, 135, 75)",
+          "fill-extrusion-opacity": 0.7,
+        },
+      });
+
+      const overlay = new deck.MapboxOverlay({
+        interleaved: true,
+        layers: [
+          new deck.GeoJsonLayer({
+            id: "bridge",
+            data: "./Bridge.geojson",
+            extruded: true,
+            wireframe: true,
+            filled: true,
+            stroked: true,
+            lineWidthUnits: "meters",
+            getLineWidth: 0.5,
+            getLineColor: [100, 195, 115, 255],
+            getFillColor: [100, 195, 115, 255],
+            getElevation: 5,
+            // material: MATERAL_FLAT,
+            // pickable: true,
+          }),
+        ],
+      });
+
+      map.addControl(overlay);
+
+      map.setSky({
+        "sky-color": "#199EF3",
+        "sky-horizon-blend": 0.7,
+        "horizon-color": "#f0f8ff",
+        "horizon-fog-blend": 0.8,
+        "fog-color": "#2c7fb8",
+        "fog-ground-blend": 0.9,
+        "atmosphere-blend": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          0,
+          1,
+          12,
+          0,
+        ],
+      });
+    });
+  </script>
+</body>
+
 </html>
